@@ -68,12 +68,17 @@ def test_connection(cfg: dict, username: str, password: str) -> dict:
 
     bind_user = (f"{username}@{cfg['ad_upn_suffix']}"
                  if cfg.get("ad_upn_suffix") else username)
-    tls = None
-    if cfg["ad_server"].lower().startswith("ldaps://"):
-        # ldap3 validiert standardmäßig NICHT -> hier erzwingen.
-        tls = ldap3.Tls(validate=ssl.CERT_REQUIRED,
-                        ca_certs_file=os.environ.get("SSL_CERT_FILE") or None)
+
+    ca_file = os.environ.get("SSL_CERT_FILE") or None
+    if ca_file and not os.path.exists(ca_file):
+        return {"ok": False,
+                "message": f"SSL_CERT_FILE zeigt auf eine nicht vorhandene Datei: "
+                           f"{ca_file} – certs-Volume bzw. Dateinamen prüfen"}
     try:
+        tls = None
+        if cfg["ad_server"].lower().startswith("ldaps://"):
+            # ldap3 validiert standardmäßig NICHT -> hier erzwingen.
+            tls = ldap3.Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=ca_file)
         server = ldap3.Server(cfg["ad_server"], connect_timeout=6, tls=tls)
         conn = ldap3.Connection(server, user=bind_user, password=password,
                                 auto_bind=True, receive_timeout=10)
@@ -106,6 +111,10 @@ def test_connection(cfg: dict, username: str, password: str) -> dict:
                 return {"ok": False,
                         "message": f"Bind erfolgreich, aber {username} ist nicht "
                                    f"Mitglied der Zugriffs-Gruppe ({group_info})"}
+    except Exception as e:
+        return {"ok": False,
+                "message": f"Bind erfolgreich, Gruppenprüfung fehlgeschlagen "
+                           f"(Base-DN prüfen): {e}"}
     finally:
         try:
             conn.unbind()
