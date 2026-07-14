@@ -1,0 +1,20 @@
+services:
+  ci-fleet-console:
+    build: .
+    container_name: ci-fleet-console
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/data                      # settings.json, users.json, auth.json, cache/
+      - ./certs:/certs:ro                 # Root-CA + Server-Zertifikat der Konsole
+    environment:
+      # Nur fuer den ERSTSTART (legt Benutzer 'admin' an); danach entfernen!
+      # - ADMIN_PASSWORD=bitte-aendern
+      - SESSION_SECURE=1
+      # Interne Root-CA: verifiziert gitlab.example.internal (python-gitlab) und LDAPS (ldap3)
+      - REQUESTS_CA_BUNDLE=/certs/internal-root-ca.pem
+      - SSL_CERT_FILE=/certs/internal-root-ca.pem
+    # HTTPS direkt in uvicorn - Zertifikat von der internen CA (SAN = FQDN):
+    command: ["uvicorn","app.main:app","--host","0.0.0.0","--port","8090",
+              "--ssl-certfile","/certs/console.pem","--ssl-keyfile","/certs/console.key"]
+    restart: unless-stopped

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI Fleet Console</title>
+<link rel="stylesheet" href="/static/css/app.css?v=2">
+</head>
+<body>
+
+<header>
+  <h1>CI <span>Fleet</span> Console</h1>
+  <div id="group-label"></div>
+  <div id="stats"></div>
+  <div id="statbar" title="grün: letzte Pipeline ok · rot: fehlgeschlagen · grau: übrige"></div>
+  <div class="grow"></div>
+  <label id="only-ci-label"><input type="checkbox" id="only-ci"> nur CI</label>
+  <input id="search" type="search" placeholder="Projekte filtern …">
+  <button id="btn-refresh">Neu laden</button>
+  <button id="btn-cache">Cache leeren</button>
+  <button id="btn-settings" title="GitLab-Verbindung und Verzeichnisse">⚙ Konfiguration</button>
+  <button id="btn-users" title="Benutzer und Anmeldung">👤 Benutzer</button>
+  <span id="who" class="muted"></span>
+  <button id="btn-logout">Abmelden</button>
+  <span id="cache-info"></span>
+</header>
+
+<div id="login-bg">
+  <div id="modal" style="width:360px">
+    <div class="eyebrow">CI Fleet Console</div>
+    <h2 style="margin-bottom:14px">Anmelden</h2>
+    <label class="cfg-label">Benutzername
+      <input id="login-user" autocomplete="username"></label>
+    <label class="cfg-label">Passwort
+      <input id="login-pass" type="password" autocomplete="current-password"></label>
+    <div id="login-err" style="color:var(--fail);min-height:18px;margin:4px 0"></div>
+    <button id="login-btn" class="primary" style="width:100%">Anmelden</button>
+  </div>
+</div>
+
+<div id="users-bg">
+  <div id="modal" style="width:640px">
+    <div class="eyebrow">Benutzer &amp; Anmeldung</div>
+    <h2 style="margin-bottom:14px">Benutzerverwaltung</h2>
+
+    <div id="users-list"></div>
+
+    <div class="sec-head" style="margin:14px 0 6px"><h3 style="flex:1;font-size:11px;
+      letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">Lokalen Benutzer anlegen</h3></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="nu-name" placeholder="Benutzername" style="flex:1;min-width:140px">
+      <input id="nu-pass" type="password" placeholder="Passwort (min. 8)" style="flex:1;min-width:140px">
+      <select id="nu-role"><option value="user">user</option><option value="admin">admin</option></select>
+      <button id="nu-add" class="primary">Anlegen</button>
+    </div>
+
+    <div class="sec-head" style="margin:18px 0 6px"><h3 style="flex:1;font-size:11px;
+      letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">Active Directory (LDAP)</h3></div>
+    <label id="ad-enable-label" style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+      <input type="checkbox" id="ad-enabled"> AD-Anmeldung aktivieren</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <label class="cfg-label" style="flex:2;min-width:220px">Server (LDAPS empfohlen)
+        <input id="ad-server" placeholder="ldaps://dc1.example.internal"></label>
+      <label class="cfg-label" style="flex:1;min-width:150px">UPN-Suffix
+        <input id="ad-upn" placeholder="example.internal"></label>
+    </div>
+    <label class="cfg-label">Base-DN (für Gruppenprüfung, optional)
+      <input id="ad-base" placeholder="DC=example,DC=internal"></label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <label class="cfg-label" style="flex:1;min-width:220px">Admin-Gruppe (DN)
+        <input id="ad-admin-grp" placeholder="CN=CI-Admins,OU=Groups,DC=example,DC=internal"></label>
+      <label class="cfg-label" style="flex:1;min-width:220px">Zugriffs-Gruppe (DN, optional)
+        <input id="ad-user-grp" placeholder="leer = jeder AD-Benutzer darf sich anmelden"></label>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <input id="ad-test-user" placeholder="Testbenutzer" style="width:150px"
+        autocomplete="off">
+      <input id="ad-test-pass" type="password" placeholder="Passwort" style="width:150px"
+        autocomplete="new-password">
+      <button id="ad-test">Verbindung testen</button>
+    </div>
+    <div id="ad-test-result" class="muted" style="min-height:18px;margin-top:4px"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button id="users-close">Schließen</button>
+      <button id="ad-save" class="primary">AD-Einstellungen speichern</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-bg">
+  <div id="modal">
+    <div class="eyebrow">Konfiguration</div>
+    <h2 style="margin-bottom:4px">GitLab &amp; Verzeichnisse</h2>
+    <div class="muted" style="margin-bottom:12px">Diese Einstellungen gelten für dein Konto.
+      Nicht gesetzte Werte übernimmt die Standard-Konfiguration.</div>
+
+    <label class="cfg-label">GitLab-Adresse
+      <input id="cfg-url" placeholder="https://git.example.int"></label>
+    <label class="cfg-label">Token (Scope: api)
+      <input id="cfg-token" type="password" placeholder="leer lassen = unverändert">
+      <span id="cfg-token-state" style="display:block;margin-top:2px"></span>
+      <button id="cfg-token-clear" style="display:none;margin-top:4px">Eigenes Token entfernen (Standard verwenden)</button></label>
+    <label class="cfg-label">Gruppenpfad (Wurzel)
+      <input id="cfg-group" placeholder="devops"></label>
+    <div style="display:flex;gap:10px">
+      <label class="cfg-label" style="flex:2">Template-Projekt
+        <input id="cfg-tpl-project" placeholder="leer = <gruppe>/ci-templates"></label>
+      <label class="cfg-label" style="flex:1">Vorlagen-Ordner
+        <input id="cfg-tpl-dir" placeholder="standard"></label>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin:10px 0 6px">
+      <button id="cfg-scan" class="primary">Verzeichnisse einlesen</button>
+      <span id="cfg-scan-status" class="muted"></span>
+    </div>
+
+    <div id="cfg-dirs-wrap" style="display:none">
+      <div class="sec-head" style="margin:8px 0 4px">
+        <h3 style="letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:var(--muted);flex:1">
+          Gemanagte Verzeichnisse</h3>
+        <button id="cfg-all">alle</button><button id="cfg-none">keine</button>
+      </div>
+      <div id="cfg-dirs"></div>
+      <div class="muted" style="margin-top:4px;font-size:11px">
+        Nichts angehakt = alles wird gemanagt.</div>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-top:16px">
+      <label id="cfg-default-label" style="display:none;gap:6px;align-items:center;color:var(--muted)">
+        <input type="checkbox" id="cfg-as-default"> als Standard für alle Benutzer speichern</label>
+      <span style="flex:1"></span>
+      <button id="cfg-cancel">Abbrechen</button>
+      <button id="cfg-save" class="primary">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<div id="layout">
+  <nav id="tree-pane">
+    <div id="tree-tools">
+      <button id="btn-expand-all" title="Alle Zweige aufklappen">alle ▾</button>
+      <button id="btn-collapse-all" title="Alle Zweige zuklappen">alle ▸</button>
+    </div>
+    <div id="loader">Lade Projektbaum …</div>
+  </nav>
+
+  <main id="detail-pane">
+    <div id="empty">Projekt links auswählen.<br>
+      <span class="muted">Punkt = letzte Pipeline · Mini-Leiste = die letzten 5 Läufe</span>
+    </div>
+
+    <div id="group-detail" style="display:none">
+      <div class="eyebrow">Gruppe</div>
+      <h2 id="grp-title"></h2>
+      <div id="grp-meta" class="muted" style="margin-bottom:16px"></div>
+      <section>
+        <div class="sec-head">
+          <h3>Gemeinsame Jobs aller Projekte</h3>
+          <button id="btn-grp-refresh">Aktualisieren</button>
+        </div>
+        <div id="grp-matrix" style="overflow:auto"></div>
+      </section>
+    </div>
+
+    <div id="detail" style="display:none">
+      <div class="eyebrow">Projekt</div>
+      <h2 id="proj-title"></h2>
+      <div id="proj-meta"></div>
+
+      <section>
+        <div class="sec-head">
+          <h3>Pipelines</h3>
+          <input id="run-ref" style="width:110px" title="Branch/Ref">
+          <input id="run-vars" style="width:200px" title="Pipeline-Variablen, kommagetrennt"
+            placeholder="VAR=wert,VAR2=wert2">
+          <button id="btn-run" class="primary">Pipeline starten</button>
+          <button id="btn-pipes-refresh">Aktualisieren</button>
+        </div>
+        <table id="pipes-table">
+          <thead><tr><th>Status</th><th>Ref</th><th>SHA</th><th>Quelle</th><th>Gestartet</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="pipes-empty" class="muted" style="display:none">Keine Pipelines vorhanden.</div>
+      </section>
+
+      <section id="vars-sec" style="display:none">
+        <div class="sec-head">
+          <h3>Benötigte Variablen</h3>
+          <button id="btn-vars-refresh">Prüfen</button>
+        </div>
+        <div id="vars-note" class="muted" style="display:none;margin-bottom:6px"></div>
+        <div id="vars-list"></div>
+        <div id="vars-actions" style="display:none;margin-top:10px">
+          <button id="btn-vars-save" class="primary">Fehlende Variablen speichern</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <h3>.gitlab-ci.yml</h3>
+          <button id="btn-versions-toggle">Versionen anzeigen</button>
+        </div>
+        <ul id="versions" style="display:none"></ul>
+        <div id="tpl-bar"><span id="tpl-label"></span>
+          <span id="tpl-buttons" class="muted">lade Vorlagen …</span>
+        </div>
+        <div id="ro-banner">Ältere Version (<span id="ro-sha"></span>) – schreibgeschützt.
+          <button id="btn-restore">Diese Version als neuen Commit übernehmen</button>
+          <button id="btn-back-head">Zurück zu HEAD</button>
+        </div>
+        <textarea id="editor" spellcheck="false"></textarea>
+        <div id="editor-bar">
+          <input id="commit-msg" placeholder="Commit-Nachricht">
+          <span class="muted">Branch: <b id="commit-branch"></b></span>
+          <button id="btn-save" class="primary">Committen</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/app.js?v=2" defer></script>
+</body>
+</html>

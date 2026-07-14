@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn>=0.29
+python-gitlab>=4.4
+ldap3>=2.9

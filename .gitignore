@@ -1,0 +1,18 @@
+# Laufzeitdaten (enthalten Tokens/Hashes - NIE committen)
+data/
+certs/
+settings.json
+users.json
+auth.json
+config.py
+cache/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Sonstiges
+*.log
+.DS_Store
