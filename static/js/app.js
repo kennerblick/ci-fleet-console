@@ -216,7 +216,7 @@ async function selectProject(id){
   CUR_REF = null;
   GRP = null;
   $("#group-detail").style.display = "none";
-  openJobs.clear(); closedJobs.clear(); showAllPipes = false;
+  openJobs.clear(); closedJobs.clear(); showAllPipes = false; autoPipelineId = null;
   clearInterval(pollTimer);
   document.querySelectorAll(".proj.active").forEach(e => e.classList.remove("active"));
   document.querySelector(`.proj[data-id="${id}"]`)?.classList.add("active");
@@ -240,6 +240,11 @@ async function selectProject(id){
 let showAllPipes = false;            // "x weitere anzeigen" aufgeklappt?
 const closedJobs = new Set();        // vom Nutzer bewusst zugeklappte Stage-Ansichten
 const PIPES_VISIBLE = 3;
+let autoPipelineId = null;           // welche Pipeline-ID die Stage-Ansicht zeigt –
+                                      // bleibt über Polls hinweg stehen, damit die
+                                      // Ansicht nicht mitten in der Beobachtung auf
+                                      // eine zwischenzeitlich neu entstandene Pipeline
+                                      // umspringt (z.B. Scheduled Pipeline eines anderen).
 
 async function loadPipelines(refresh){
   const tbody = $("#pipes-table tbody");
@@ -250,10 +255,15 @@ async function loadPipelines(refresh){
   $("#pipes-empty").style.display = data.pipelines.length ? "none" : "block";
 
   const visible = showAllPipes ? data.pipelines : data.pipelines.slice(0, PIPES_VISIBLE);
-  // Skip-Pipelines (z. B. aus ci.skip-Pushes der CI selbst) sind Rauschen –
-  // die Stage-Ansicht bekommt die neueste Pipeline, die nicht "skipped" ist.
-  let autoIdx = visible.findIndex(p => p.status !== "skipped");
+  // Skip-Pipelines (z. B. aus ci.skip-Pushes der CI selbst) sind Rauschen.
+  // Die zuletzt gezeigte Pipeline bleibt aktiv, solange sie noch sichtbar ist;
+  // nur beim allerersten Laden (oder wenn sie herausgefallen ist) wird neu auf
+  // die neueste, nicht übersprungene Pipeline verzweigt.
+  let autoIdx = autoPipelineId != null
+    ? visible.findIndex(p => p.id === autoPipelineId) : -1;
+  if (autoIdx === -1) autoIdx = visible.findIndex(p => p.status !== "skipped");
   if (autoIdx === -1) autoIdx = 0;
+  autoPipelineId = visible[autoIdx]?.id ?? null;
   visible.forEach((p, i) => {
     const tr = document.createElement("tr");
     tr.innerHTML =
@@ -504,6 +514,7 @@ async function runPipeline(){
             `CI_PIPELINE_SOURCE == "api" zu.`, 8000);
     else
       toast(`Pipeline #${p.id} gestartet (${p.status}).`);
+    autoPipelineId = p.id;
     loadPipelines(1);
   } catch(e){ toast("Fehler: " + e.message, 6000); }
   finally { $("#btn-run").disabled = false; }
