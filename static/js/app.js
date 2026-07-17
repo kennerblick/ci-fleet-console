@@ -217,7 +217,7 @@ async function selectProject(id){
   GRP = null;
   $("#group-detail").style.display = "none";
   openJobs.clear(); closedJobs.clear(); showAllPipes = false; autoPipelineId = null;
-  clearInterval(pollTimer);
+  clearInterval(pollTimer); pollTimer = null;
   document.querySelectorAll(".proj.active").forEach(e => e.classList.remove("active"));
   document.querySelector(`.proj[data-id="${id}"]`)?.classList.add("active");
   $("#empty").style.display = "none";
@@ -299,8 +299,22 @@ async function loadPipelines(refresh){
   }
 
   const active = data.pipelines.some(p => ["running","pending","created"].includes(p.status));
-  clearInterval(pollTimer);
-  if (active) pollTimer = setInterval(() => loadPipelines(1), 10000);
+  clearInterval(pollTimer); pollTimer = null;
+  if (active) ensurePolling();
+}
+
+function ensurePolling(){
+  if (pollTimer) return;
+  pollTimer = setInterval(() => loadPipelines(1), 10000);
+}
+
+const ACTIVE_STATUSES = ["running", "pending", "created"];
+// Prueft auch verschachtelte Child-Pipeline-Jobs (Trigger-Bridges): eine
+// Bridge kann laengst "success" sein, waehrend ihre Downstream-Pipeline
+// (ohne strategy: depend) noch laeuft - das darf das Polling nicht stoppen.
+function anyActiveJob(jobs){
+  return jobs.some(j => ACTIVE_STATUSES.includes(j.status) ||
+    (j.downstream?.jobs && anyActiveJob(j.downstream.jobs)));
 }
 
 const openJobs = new Set();   // Pipeline-IDs mit aufgeklappter Stage-Ansicht
@@ -321,6 +335,7 @@ async function toggleJobs(tr, pid, forceOpen){
   try {
     const d = await api(`/api/projects/${CUR.id}/pipelines/${pid}/jobs`);
     jr.firstElementChild.innerHTML = renderStages(d.jobs, pid);
+    if (anyActiveJob(d.jobs)) ensurePolling();
   } catch(e){ jr.firstElementChild.textContent = "Fehler: " + e.message; }
 }
 
@@ -786,7 +801,7 @@ let GRP = null;   // aktuell angezeigter Gruppenpfad, null = Projektansicht
 
 async function openGroupJobs(path, refresh){
   GRP = path; CUR = null;
-  clearInterval(pollTimer);
+  clearInterval(pollTimer); pollTimer = null;
   document.querySelectorAll(".proj.active").forEach(el => el.classList.remove("active"));
   $("#empty").style.display = "none";
   $("#detail").style.display = "none";
