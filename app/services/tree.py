@@ -29,7 +29,7 @@ def _enrich(project: dict) -> dict:
 
     pipes: list[dict] = []
     try:
-        raw = proj.pipelines.list(per_page=config.SPARK_COUNT * 4, page=1)
+        raw = proj.pipelines.list(ref=ref, per_page=config.SPARK_COUNT * 4, page=1)
         pipes = [pipeline_dict(p) for p in raw
                  if p.attributes.get("status") != "skipped"][:config.SPARK_COUNT]
     except Exception:
