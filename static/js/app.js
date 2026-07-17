@@ -7,8 +7,13 @@ const api = (url, opt) => {
     opt.headers = Object.assign({}, opt.headers, {"Authorization": "Bearer " + AUTH_TOKEN});
   return fetch(url, opt).then(async r => {
   if (r.status === 401 && !url.startsWith("/api/auth/")){
-    showLogin();
-    throw new Error("Nicht angemeldet");
+    // Absicherung: erst verifizieren, ob wirklich die Session weg ist –
+    // ein 401 aus einem Backend-Fehlerpfad darf nicht ausloggen.
+    let d = {}; try { d = await r.json(); } catch(e){}
+    const chk = await fetch("/api/auth/me", AUTH_TOKEN
+      ? {headers: {"Authorization": "Bearer " + AUTH_TOKEN}} : {});
+    if (!chk.ok){ showLogin(); throw new Error("Nicht angemeldet"); }
+    throw new Error(d.detail || "401 Unauthorized");
   }
   if (!r.ok) { let d = {}; try { d = await r.json(); } catch(e){}
     throw new Error(d.detail || r.status + " " + r.statusText); }

@@ -45,7 +45,7 @@ def scan(body: ScanBody, session: dict = Depends(current_user)):
     """Verzeichnisse (Subgruppen 1. Ebene) einlesen – testet zugleich die Verbindung."""
     e = settings_store.current()
     url = (body.gitlab_url or e["gitlab_url"]).strip()
-    token = body.token or e["private_token"]
+    token = (body.token or e["private_token"]).strip()
     group_path = (body.group_path or e["group_path"]).strip().strip("/")
     if not url or not token or not group_path:
         raise HTTPException(400, "GitLab-Adresse, Token und Gruppenpfad angeben")
@@ -58,7 +58,9 @@ def scan(body: ScanBody, session: dict = Depends(current_user)):
         root_projects = group.projects.list(include_subgroups=False,
                                             archived=False, per_page=1)
     except gitlab.exceptions.GitlabAuthenticationError:
-        raise HTTPException(401, "Token ungültig")
+        # 400, nicht 401: ein von GitLab abgelehntes PAT ist kein Session-Problem
+        raise HTTPException(400, "GitLab hat das Token abgelehnt – "
+                                 "Token prüfen (Scope: api, keine Leerzeichen)")
     except gitlab.exceptions.GitlabGetError:
         raise HTTPException(404, f"Gruppe {group_path} nicht gefunden")
     except Exception as e:

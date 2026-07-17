@@ -97,8 +97,8 @@ def update(username: str, body: dict[str, Any], *, as_default: bool) -> None:
                   else _settings["users"].setdefault(username.lower(), {}))
         if body.get("gitlab_url"):
             target["gitlab_url"] = body["gitlab_url"].strip()
-        if body.get("token"):                   # leer = unverändert lassen
-            target["private_token"] = body["token"]
+        if body.get("token") and body["token"].strip():   # leer = unverändert
+            target["private_token"] = body["token"].strip()
         if body.get("clear_token") and not as_default:
             target.pop("private_token", None)   # zurück zum Standard-Token
         if body.get("group_path"):
