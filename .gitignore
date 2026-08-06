@@ -4,7 +4,7 @@ certs/
 settings.json
 users.json
 auth.json
-config.py
+/config.py
 cache/
 
 # Python
