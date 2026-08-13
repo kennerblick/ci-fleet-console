@@ -8,6 +8,7 @@ sondern derselbe Mechanismus wie der bestehende ▶-Play-Button auf einem Job.
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import HTTPException
@@ -45,21 +46,50 @@ def _project_names() -> dict[str, str]:
     return {str(p["id"]): p["name"] for p in tree_data["projects"]}
 
 
+def _jobs_by_name(project_id: int, pipeline_id: int) -> dict[str, dict]:
+    """Jobs der Pipeline inkl. aller Kind-Pipelines hinter Trigger-Bridges,
+    flach nach einfachem Job-Namen (nicht qname) indiziert."""
+    flat = pipelines.flatten_jobs(pipelines.pipeline_jobs(project_id, pipeline_id))
+    return {j["name"]: j for j in flat}
+
+
 def _play_jobs(project_id: int, job_names: list[str]) -> list[str]:
     """Spielt die angegebenen Jobs der letzten Pipeline ab, liefert die
     tatsächlich gespielten Namen oder wirft HTTPException, wenn keine
-    Pipeline existiert oder ein Job dort fehlt."""
+    Pipeline existiert oder ein Job dort fehlt.
+
+    apt-update/apt-upgrade/cron-stop liegen nicht auf oberster Ebene, sondern
+    in der Kind-Pipeline hinter dem manuellen Trigger-Job MAINT_BRIDGE_NAME
+    ("Wartung") - der wird bei Bedarf zuerst gespielt, danach wird auf das
+    Erscheinen der Kind-Pipeline-Jobs gewartet."""
     pipe = pipelines.latest_pipeline(project_id)
     if not pipe:
         raise HTTPException(404, "Keine Pipeline vorhanden")
-    jobs_by_name = {j["name"]: j for j in pipelines.pipeline_jobs(project_id, pipe["id"])}
-    missing = [name for name in job_names if name not in jobs_by_name]
+
+    by_name = _jobs_by_name(project_id, pipe["id"])
+    missing = [name for name in job_names if name not in by_name]
+
     if missing:
-        raise HTTPException(
-            404, f"Job(s) nicht in letzter Pipeline (#{pipe['id']}) gefunden: "
-                 f"{', '.join(missing)}")
+        bridge = by_name.get(config.MAINT_BRIDGE_NAME)
+        if not bridge:
+            raise HTTPException(
+                404, f"Job(s) nicht in letzter Pipeline (#{pipe['id']}) gefunden: "
+                     f"{', '.join(missing)}")
+        if bridge["status"] == "manual":
+            pipelines.job_action(project_id, bridge["id"], "play")
+        for _ in range(config.MAINT_BRIDGE_POLL_ATTEMPTS):
+            time.sleep(config.MAINT_BRIDGE_POLL_INTERVAL)
+            by_name = _jobs_by_name(project_id, pipe["id"])
+            missing = [name for name in job_names if name not in by_name]
+            if not missing:
+                break
+        if missing:
+            raise HTTPException(
+                404, f"Job(s) auch nach Start von '{config.MAINT_BRIDGE_NAME}' nicht "
+                     f"gefunden (Kind-Pipeline evtl. noch nicht fertig): {', '.join(missing)}")
+
     for name in job_names:
-        pipelines.job_action(project_id, jobs_by_name[name]["id"], "play")
+        pipelines.job_action(project_id, by_name[name]["id"], "play")
     return list(job_names)
 
 

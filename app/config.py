@@ -31,6 +31,13 @@ TTL_GROUP_VARS = 300
 TTL_GROUP_JOBS = 90
 
 WORKERS = 16                            # parallele GitLab-Requests
+
+# Wartungsmodus: apt-update/apt-upgrade/cron-stop (Linux) liegen hinter dem
+# manuellen Trigger-Job "Wartung" (Kind-Pipeline) statt direkt in der obersten
+# Pipeline-Ebene - erst starten, dann auf die Kind-Pipeline-Jobs warten.
+MAINT_BRIDGE_NAME = "Wartung"
+MAINT_BRIDGE_POLL_ATTEMPTS = 6
+MAINT_BRIDGE_POLL_INTERVAL = 2.0        # Sekunden zwischen den Versuchen
 SPARK_COUNT = 5                         # Pipelines je Projekt in der Baum-Sparkline
 GITLAB_TIMEOUT = 20
 

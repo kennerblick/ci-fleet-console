@@ -12,6 +12,11 @@ def _isolated_store(tmp_path, monkeypatch):
                         tmp_path / "maintenance_tags.json")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    monkeypatch.setattr(maintenance.time, "sleep", lambda s: None)
+
+
 def test_reboot_implies_update():
     entry = maintenance_store.set_tag(1, update=False, reboot=True,
                                       server_group="linux-intern")
@@ -124,3 +129,64 @@ def test_bulk_run_no_matching_projects_is_404():
     with pytest.raises(HTTPException) as exc:
         maintenance.bulk_run("update", "windows")
     assert exc.value.status_code == 404
+
+
+def _fake_pipeline_jobs_with_bridge(bridge_status, appears_after=1):
+    """Erste(n) Aufruf(e) ohne Kind-Pipeline-Jobs, danach mit apt-update/-upgrade."""
+    calls = {"n": 0}
+
+    def fake(pid, pipeline_id):
+        calls["n"] += 1
+        bridge = {"id": 1, "name": "Wartung", "status": bridge_status,
+                  "bridge": True, "downstream": None}
+        if calls["n"] <= appears_after:
+            return [bridge]
+        return [{**bridge, "downstream": {"jobs": [
+            {"id": 2, "name": "apt-update", "status": "manual"},
+            {"id": 3, "name": "apt-upgrade", "status": "manual"}]}}]
+    return fake
+
+
+def test_bridge_job_is_played_when_child_jobs_missing(monkeypatch):
+    _tag(1, True, False, "linux-intern")
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a"})
+    monkeypatch.setattr(maintenance.pipelines, "latest_pipeline", lambda pid: {"id": 100})
+    monkeypatch.setattr(maintenance.pipelines, "pipeline_jobs",
+                        _fake_pipeline_jobs_with_bridge("manual"))
+    played = []
+    monkeypatch.setattr(maintenance.pipelines, "job_action",
+                        lambda pid, job_id, action: played.append((pid, job_id, action)))
+
+    result = maintenance.bulk_run("update", "linux-intern")
+    assert [t["project_id"] for t in result["triggered"]] == [1]
+    assert played[0] == (1, 1, "play")               # Bridge zuerst gespielt
+    assert (1, 2, "play") in played and (1, 3, "play") in played
+
+
+def test_bridge_already_running_is_not_replayed(monkeypatch):
+    _tag(1, True, False, "linux-intern")
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a"})
+    monkeypatch.setattr(maintenance.pipelines, "latest_pipeline", lambda pid: {"id": 100})
+    monkeypatch.setattr(maintenance.pipelines, "pipeline_jobs",
+                        _fake_pipeline_jobs_with_bridge("running"))
+    played = []
+    monkeypatch.setattr(maintenance.pipelines, "job_action",
+                        lambda pid, job_id, action: played.append((pid, job_id, action)))
+
+    result = maintenance.bulk_run("update", "linux-intern")
+    assert [t["project_id"] for t in result["triggered"]] == [1]
+    assert (1, 1, "play") not in played              # Bridge lief schon
+    assert (1, 2, "play") in played and (1, 3, "play") in played
+
+
+def test_bridge_timeout_if_child_jobs_never_appear(monkeypatch):
+    _tag(1, True, False, "linux-intern")
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a"})
+    monkeypatch.setattr(maintenance.pipelines, "latest_pipeline", lambda pid: {"id": 100})
+    monkeypatch.setattr(maintenance.pipelines, "pipeline_jobs",
+                        _fake_pipeline_jobs_with_bridge("manual", appears_after=999))
+    monkeypatch.setattr(maintenance.pipelines, "job_action", lambda pid, job_id, action: None)
+
+    result = maintenance.bulk_run("update", "linux-intern")
+    assert result["failed"][0]["project_id"] == 1
+    assert "Wartung" in result["failed"][0]["error"]
