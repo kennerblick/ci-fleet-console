@@ -102,7 +102,6 @@ tr.jobsrow td{background:var(--bg);padding:10px 14px}
   padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2)}
 .maint-group-label{font-weight:600;color:var(--accent)}
 .maint-count{font-size:11px;white-space:nowrap}
-.maint-vars{width:180px;font-size:11px}
 .maint-tag{margin-left:6px;flex:none;cursor:pointer;opacity:.4;font-size:11px}
 .maint-tag:hover{opacity:1}
 .maint-tag.mt-update{opacity:1;color:var(--pend)}

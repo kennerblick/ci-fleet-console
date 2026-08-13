@@ -900,49 +900,44 @@ function maintCounts(group){
           reboot: entries.filter(t => t.reboot).length};
 }
 
+const MAINT_ACTION_TITLES = {update: "Bulk-Update", reboot: "Bulk-Reboot", "cron-stop": "Cron-Stop"};
+
 function renderMaintBar(){
   const bar = $("#maint-bar");
   bar.innerHTML = "";
   for (const group of Object.keys(SERVER_GROUP_LABELS)){
     const c = maintCounts(group);
+    const isLinux = group !== "windows";   // cron-stop gibt es nur für Linux (linux-wartung.yml)
     const box = document.createElement("div");
     box.className = "maint-group";
-    const updVal = localStorage.getItem(`maintvars_${group}_update`) || "";
-    const rebVal = localStorage.getItem(`maintvars_${group}_reboot`) || "";
     box.innerHTML =
       `<span class="maint-group-label">${SERVER_GROUP_LABELS[group]}</span>` +
       `<span class="maint-count muted">${c.update} getaggt` +
       (c.reboot ? `, ${c.reboot} davon Reboot` : "") + `</span>` +
-      `<input class="maint-vars" placeholder="Variablen (KEY=wert,…)" value="${updVal}">` +
       `<button class="btn-maint-update"${c.update ? "" : " disabled"}>Update starten</button>` +
-      (c.reboot
-        ? `<input class="maint-vars" placeholder="Variablen (KEY=wert,…)" value="${rebVal}">` +
-          `<button class="btn-maint-reboot">Reboot starten</button>`
-        : "");
-    const varsInputs = box.querySelectorAll(".maint-vars");
-    box.querySelector(".btn-maint-update").onclick = () =>
-      runBulk("update", group, varsInputs[0], c.update);
+      (c.reboot ? `<button class="btn-maint-reboot">Reboot starten</button>` : "") +
+      (isLinux && c.update ? `<button class="btn-maint-cronstop">Cron-Stop starten</button>` : "");
+    box.querySelector(".btn-maint-update").onclick = () => runBulk("update", group, c.update);
     if (c.reboot)
-      box.querySelector(".btn-maint-reboot").onclick = () =>
-        runBulk("reboot", group, varsInputs[1], c.reboot);
+      box.querySelector(".btn-maint-reboot").onclick = () => runBulk("reboot", group, c.reboot);
+    if (isLinux && c.update)
+      box.querySelector(".btn-maint-cronstop").onclick = () => runBulk("cron-stop", group, c.update);
     bar.appendChild(box);
   }
 }
 
-async function runBulk(action, group, input, count){
-  const label = action === "update" ? "Bulk-Update" : "Bulk-Reboot";
+async function runBulk(action, group, count){
+  const label = MAINT_ACTION_TITLES[action];
   if (!confirm(`${label} für ${count} Projekt(e) in „${SERVER_GROUP_LABELS[group]}“ jetzt starten?`))
     return;
-  const varsStr = input.value;
-  localStorage.setItem(`maintvars_${group}_${action}`, varsStr);
   try {
     const d = await api(`/api/maintenance/bulk/${action}`, {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({server_group: group, variables: parseVars(varsStr)})
+      body: JSON.stringify({server_group: group})
     });
     let msg = `${label} ${SERVER_GROUP_LABELS[group]}: ${d.triggered.length} gestartet`;
     if (d.failed.length)
-      msg += `, ${d.failed.length} fehlgeschlagen (${d.failed.map(f => f.name).join(", ")})`;
+      msg += `, ${d.failed.length} fehlgeschlagen (${d.failed.map(f => f.name + ": " + f.error).join("; ")})`;
     toast(msg, 8000);
   } catch(e){ toast("Fehler: " + e.message, 6000); }
 }

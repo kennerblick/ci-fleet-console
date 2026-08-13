@@ -36,42 +36,91 @@ def _tag(pid, update, reboot, group):
     maintenance_store.set_tag(pid, update=update, reboot=reboot, server_group=group)
 
 
-def test_bulk_run_filters_by_group_and_action(monkeypatch):
-    _tag(1, True, False, "linux-intern")     # update only
-    _tag(2, True, True, "linux-intern")      # update + reboot
-    _tag(3, True, False, "windows")          # andere Gruppe
+def _stub_pipeline_and_jobs(monkeypatch, jobs_by_pid):
+    """jobs_by_pid: project_id -> Liste von {'id','name'} der letzten Pipeline."""
+    monkeypatch.setattr(maintenance.pipelines, "latest_pipeline",
+                        lambda pid: {"id": pid * 100})
+    monkeypatch.setattr(maintenance.pipelines, "pipeline_jobs",
+                        lambda pid, pipeline_id: jobs_by_pid.get(pid, []))
+    played = []
+    monkeypatch.setattr(maintenance.pipelines, "job_action",
+                        lambda pid, job_id, action: played.append((pid, job_id, action)))
+    return played
 
+
+def test_bulk_update_plays_apt_jobs_for_linux(monkeypatch):
+    _tag(1, True, False, "linux-intern")     # nur Update
+    _tag(2, True, True, "linux-intern")      # Update + Reboot
+    _tag(3, True, False, "windows")          # andere Gruppe
     monkeypatch.setattr(maintenance, "_project_names",
                         lambda: {"1": "a", "2": "b", "3": "c"})
-    monkeypatch.setattr(maintenance.pipelines, "run_pipeline",
-                        lambda pid, ref, variables: {"id": pid, "status": "created"})
+    jobs = {pid: [{"id": pid * 10 + 1, "name": "apt-update"},
+                  {"id": pid * 10 + 2, "name": "apt-upgrade"},
+                  {"id": pid * 10 + 3, "name": "system-reboot"}]
+            for pid in (1, 2, 3)}
+    played = _stub_pipeline_and_jobs(monkeypatch, jobs)
 
-    update_result = maintenance.bulk_run("update", "linux-intern", [])
+    update_result = maintenance.bulk_run("update", "linux-intern")
     assert {t["project_id"] for t in update_result["triggered"]} == {1, 2}
+    assert all(t["jobs"] == ["apt-update", "apt-upgrade"] for t in update_result["triggered"])
+    assert (1, 11, "play") in played and (1, 12, "play") in played
 
-    reboot_result = maintenance.bulk_run("reboot", "linux-intern", [])
+    played.clear()
+    reboot_result = maintenance.bulk_run("reboot", "linux-intern")
     assert {t["project_id"] for t in reboot_result["triggered"]} == {2}
+    assert played == [(2, 23, "play")]
 
 
-def test_bulk_run_collects_failures_without_aborting(monkeypatch):
+def test_bulk_update_plays_windows_job(monkeypatch):
+    _tag(1, True, False, "windows")
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a"})
+    jobs = {1: [{"id": 5, "name": "windows-updates-install"}]}
+    _stub_pipeline_and_jobs(monkeypatch, jobs)
+
+    result = maintenance.bulk_run("update", "windows")
+    assert result["triggered"] == [{"project_id": 1, "name": "a",
+                                    "jobs": ["windows-updates-install"]}]
+
+
+def test_cron_stop_targets_update_tagged_projects(monkeypatch):
+    _tag(1, True, False, "linux-extern")
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a"})
+    _stub_pipeline_and_jobs(monkeypatch, {1: [{"id": 9, "name": "cron-stop"}]})
+
+    result = maintenance.bulk_run("cron-stop", "linux-extern")
+    assert [t["project_id"] for t in result["triggered"]] == [1]
+
+
+def test_cron_stop_not_available_for_windows():
+    with pytest.raises(HTTPException) as exc:
+        maintenance.bulk_run("cron-stop", "windows")
+    assert exc.value.status_code == 400
+
+
+def test_missing_job_in_latest_pipeline_is_reported_as_failure(monkeypatch):
     _tag(1, True, False, "windows")
     _tag(2, True, False, "windows")
-    monkeypatch.setattr(maintenance, "_project_names",
-                        lambda: {"1": "a", "2": "b"})
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a", "2": "b"})
+    # Projekt 1 hat den erwarteten Job nicht (z.B. Template nicht eingebunden)
+    _stub_pipeline_and_jobs(monkeypatch, {2: [{"id": 20, "name": "windows-updates-install"}]})
 
-    def fake_run(pid, ref, variables):
-        if pid == 1:
-            raise HTTPException(400, "GitLab-Fehler")
-        return {"id": pid, "status": "created"}
-
-    monkeypatch.setattr(maintenance.pipelines, "run_pipeline", fake_run)
-    result = maintenance.bulk_run("update", "windows", [])
+    result = maintenance.bulk_run("update", "windows")
     assert [f["project_id"] for f in result["failed"]] == [1]
+    assert "windows-updates-install" in result["failed"][0]["error"]
     assert [t["project_id"] for t in result["triggered"]] == [2]
 
 
-def test_bulk_run_no_matching_projects_is_404(monkeypatch):
-    monkeypatch.setattr(maintenance, "_project_names", lambda: {})
+def test_no_pipeline_at_all_is_reported_as_failure(monkeypatch):
+    _tag(1, True, False, "windows")
+    monkeypatch.setattr(maintenance, "_project_names", lambda: {"1": "a"})
+    monkeypatch.setattr(maintenance.pipelines, "latest_pipeline", lambda pid: None)
+
+    result = maintenance.bulk_run("update", "windows")
+    assert result["failed"][0]["project_id"] == 1
+    assert "Keine Pipeline" in result["failed"][0]["error"]
+
+
+def test_bulk_run_no_matching_projects_is_404():
     with pytest.raises(HTTPException) as exc:
-        maintenance.bulk_run("update", "windows", [])
+        maintenance.bulk_run("update", "windows")
     assert exc.value.status_code == 404

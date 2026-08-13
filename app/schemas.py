@@ -83,4 +83,3 @@ class MaintenanceTagBody(BaseModel):
 
 class MaintenanceBulkBody(BaseModel):
     server_group: str
-    variables: list[dict] = Field(default_factory=list)

@@ -24,9 +24,14 @@ def put_tag(project_id: int, body: MaintenanceTagBody):
 
 @router.post("/bulk/update")
 def bulk_update(body: MaintenanceBulkBody):
-    return maintenance.bulk_run("update", body.server_group, body.variables)
+    return maintenance.bulk_run("update", body.server_group)
 
 
 @router.post("/bulk/reboot")
 def bulk_reboot(body: MaintenanceBulkBody):
-    return maintenance.bulk_run("reboot", body.server_group, body.variables)
+    return maintenance.bulk_run("reboot", body.server_group)
+
+
+@router.post("/bulk/cron-stop")
+def bulk_cron_stop(body: MaintenanceBulkBody):
+    return maintenance.bulk_run("cron-stop", body.server_group)

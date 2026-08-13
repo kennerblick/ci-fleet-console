@@ -86,6 +86,15 @@ def flatten_jobs(entries: list[dict], prefix: str = "") -> list[dict]:
     return flat
 
 
+def latest_pipeline(project_id: int) -> dict | None:
+    """Neueste nicht übersprungene Pipeline eines Projekts (oder None)."""
+    proj = get_project(project_id)
+    for p in proj.pipelines.list(per_page=10, page=1):
+        if p.attributes.get("status") != "skipped":
+            return pipeline_dict(p)
+    return None
+
+
 def run_pipeline(project_id: int, ref: str | None,
                  variables: list[dict]) -> dict:
     proj = get_project(project_id)
