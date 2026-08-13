@@ -15,6 +15,7 @@
   <div id="statbar" title="grün: letzte Pipeline ok · rot: fehlgeschlagen · grau: übrige"></div>
   <div class="grow"></div>
   <label id="only-ci-label"><input type="checkbox" id="only-ci"> nur CI</label>
+  <button id="btn-maintenance" title="Wartungsmodus: nur Update/Reboot-getaggte Projekte anzeigen">🛠 Wartung</button>
   <input id="search" type="search" placeholder="Projekte filtern …">
   <button id="btn-refresh">Neu laden</button>
   <button id="btn-cache">Cache leeren</button>
@@ -24,6 +25,8 @@
   <button id="btn-logout">Abmelden</button>
   <span id="cache-info"></span>
 </header>
+
+<div id="maint-bar"></div>
 
 <div id="login-bg">
   <div id="modal" style="width:360px">
@@ -85,6 +88,29 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button id="users-close">Schließen</button>
       <button id="ad-save" class="primary">AD-Einstellungen speichern</button>
+    </div>
+  </div>
+</div>
+
+<div id="maint-tag-bg">
+  <div id="modal" style="width:360px">
+    <div class="eyebrow">Wartungs-Tag</div>
+    <h2 id="mt-title" style="margin-bottom:14px"></h2>
+    <label class="cfg-label">Servergruppe
+      <select id="mt-group">
+        <option value="linux-intern">Linux (intern)</option>
+        <option value="linux-extern">Linux (extern)</option>
+        <option value="windows">Windows</option>
+      </select>
+    </label>
+    <label style="display:flex;gap:6px;align-items:center;margin:10px 0">
+      <input type="checkbox" id="mt-update"> nimmt an Bulk-Update teil</label>
+    <label style="display:flex;gap:6px;align-items:center;margin-bottom:14px">
+      <input type="checkbox" id="mt-reboot"> nimmt zusätzlich an Bulk-Reboot teil</label>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="mt-remove" style="margin-right:auto">Tag entfernen</button>
+      <button id="mt-cancel">Abbrechen</button>
+      <button id="mt-save" class="primary">Speichern</button>
     </div>
   </div>
 </div>

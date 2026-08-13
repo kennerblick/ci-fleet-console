@@ -15,7 +15,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, security, settings_store
-from .routers import auth, groups, projects, settings, system, templates, users
+from .routers import (auth, groups, maintenance, projects, settings, system,
+                      templates, users)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +67,8 @@ def create_app() -> FastAPI:
                       "⚙ Konfiguration ein gültiges Token (Scope: api) hinterlegen"})
 
     for router in (auth.router, users.router, settings.router, projects.router,
-                   templates.router, groups.router, system.router):
+                   templates.router, groups.router, system.router,
+                   maintenance.router):
         application.include_router(router)
 
     application.mount("/static", StaticFiles(directory=config.STATIC_DIR),

@@ -17,6 +17,7 @@ CACHE_DIR = DATA_DIR / "cache"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 USERS_FILE = DATA_DIR / "users.json"
 AUTHCFG_FILE = DATA_DIR / "auth.json"
+MAINTENANCE_TAGS_FILE = DATA_DIR / "maintenance_tags.json"
 
 CI_FILE = ".gitlab-ci.yml"
 DEFAULT_TEMPLATES_DIR = "standard"      # Ordner im ci-templates-Projekt

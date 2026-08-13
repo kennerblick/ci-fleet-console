@@ -65,6 +65,22 @@ let CUR = null;           // ausgewähltes Projekt
 let CUR_REF = null;       // angezeigte CI-Version (null = HEAD)
 let pollTimer = null;
 
+let MAINT_TAGS = {};      // project_id -> {update, reboot, server_group}
+let maintenanceMode = false;
+let MT_CUR = null;        // Projekt, das gerade im Wartungs-Tag-Modal bearbeitet wird
+const SERVER_GROUP_LABELS = {
+  "linux-intern": "Linux (intern)",
+  "linux-extern": "Linux (extern)",
+  "windows": "Windows",
+};
+
+function parseVars(str){
+  return str.split(",").map(s => s.trim()).filter(Boolean)
+    .map(s => { const i = s.indexOf("=");
+      return i > 0 ? {key: s.slice(0, i).trim(), value: s.slice(i + 1).trim()} : null; })
+    .filter(Boolean);
+}
+
 const stClass = s => "st-" + (["success","failed","running","pending","created",
   "canceled","skipped","manual"].includes(s) ? s : "none");
 const stLabel = s => s === "manual" ? "wartet (manuell)" : s;
@@ -90,7 +106,12 @@ function scheduleStaleReload(){
 async function loadTree(refresh){
   $("#loader").style.display = "block";
   try {
-    TREE = await api("/api/tree" + (refresh ? "?refresh=1" : ""));
+    const [t, tags] = await Promise.all([
+      api("/api/tree" + (refresh ? "?refresh=1" : "")),
+      api("/api/maintenance/tags").catch(() => ({})),   // nicht kritisch fuers Laden des Baums
+    ]);
+    TREE = t;
+    MAINT_TAGS = tags;
   } catch(e){
     toast("Fehler: " + e.message, 6000);
     if (/nicht konfiguriert|Token ungültig/.test(e.message)) openSettings();
@@ -101,6 +122,7 @@ async function loadTree(refresh){
     + (TREE.stale ? " · aktualisiere im Hintergrund …" : (TREE.cached ? " (Cache)" : ""));
   renderTree();
   renderStats();
+  renderMaintBar();
   cacheInfo();
   scheduleStaleReload();
 }
@@ -122,6 +144,19 @@ function buildHierarchy(projects){
 const relevantPipe = p =>
   p.pipelines.find(x => x.status !== "skipped") || p.pipelines[0];
 
+function maintTagIcon(p){
+  const tag = MAINT_TAGS[p.id];
+  const span = document.createElement("span");
+  span.className = "maint-tag" + (tag ? (tag.reboot ? " mt-reboot" : " mt-update") : "");
+  span.textContent = "🛠";
+  span.title = tag
+    ? `Wartung: ${SERVER_GROUP_LABELS[tag.server_group] || tag.server_group}` +
+      (tag.reboot ? " · Update + Reboot" : " · Update")
+    : "Wartungs-Tag setzen";
+  span.onclick = e => { e.preventDefault(); e.stopPropagation(); openMaintTag(p); };
+  return span;
+}
+
 function projRow(p){
   const div = document.createElement("div");
   div.className = "proj"; div.dataset.id = p.id; div.title = p.rel_path;
@@ -132,6 +167,7 @@ function projRow(p){
     ? `<span class="spark">${p.pipelines.map(x=>`<i class="${stClass(x.status)}" title="${x.status}"></i>`).join("")}</span>`
     : (p.has_ci ? `<span class="spark"></span>` : `<span class="noci">kein CI</span>`);
   div.innerHTML = dot + `<span class="name">${p.name}</span>` + spark;
+  div.appendChild(maintTagIcon(p));
   const open = () => selectProject(p.id);
   div.onclick = open;
   div.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
@@ -180,6 +216,7 @@ function renderTree(){
   const onlyCi = $("#only-ci").checked;
   const list = TREE.projects.filter(p =>
     (!onlyCi || p.has_ci) &&
+    (!maintenanceMode || MAINT_TAGS[p.id]?.update) &&
     (!filter || p.rel_path.toLowerCase().includes(filter)));
   const h = buildHierarchy(list);
   // Bei aktiver Suche alle Treffer-Zweige aufklappen, sonst nur gemerkte
@@ -510,11 +547,7 @@ async function saveCi(restore){
 
 async function runPipeline(){
   const ref = $("#run-ref").value.trim();
-  const variables = $("#run-vars").value.split(",")
-    .map(s => s.trim()).filter(Boolean)
-    .map(s => { const i = s.indexOf("=");
-      return i > 0 ? {key: s.slice(0, i).trim(), value: s.slice(i + 1).trim()} : null; })
-    .filter(Boolean);
+  const variables = parseVars($("#run-vars").value);
   $("#btn-run").disabled = true;
   try {
     // Erst prüfen, ob alle Pflicht-Variablen vorhanden sind
@@ -859,6 +892,123 @@ function renderMatrix(d){
 }
 
 $("#btn-grp-refresh").onclick = () => GRP !== null && openGroupJobs(GRP, 1);
+
+/* ------------------------------------------------------ Wartungsmodus (🛠) */
+function maintCounts(group){
+  const entries = Object.values(MAINT_TAGS).filter(t => t.server_group === group);
+  return {update: entries.filter(t => t.update).length,
+          reboot: entries.filter(t => t.reboot).length};
+}
+
+function renderMaintBar(){
+  const bar = $("#maint-bar");
+  bar.innerHTML = "";
+  for (const group of Object.keys(SERVER_GROUP_LABELS)){
+    const c = maintCounts(group);
+    const box = document.createElement("div");
+    box.className = "maint-group";
+    const updVal = localStorage.getItem(`maintvars_${group}_update`) || "";
+    const rebVal = localStorage.getItem(`maintvars_${group}_reboot`) || "";
+    box.innerHTML =
+      `<span class="maint-group-label">${SERVER_GROUP_LABELS[group]}</span>` +
+      `<span class="maint-count muted">${c.update} getaggt` +
+      (c.reboot ? `, ${c.reboot} davon Reboot` : "") + `</span>` +
+      `<input class="maint-vars" placeholder="Variablen (KEY=wert,…)" value="${updVal}">` +
+      `<button class="btn-maint-update"${c.update ? "" : " disabled"}>Update starten</button>` +
+      (c.reboot
+        ? `<input class="maint-vars" placeholder="Variablen (KEY=wert,…)" value="${rebVal}">` +
+          `<button class="btn-maint-reboot">Reboot starten</button>`
+        : "");
+    const varsInputs = box.querySelectorAll(".maint-vars");
+    box.querySelector(".btn-maint-update").onclick = () =>
+      runBulk("update", group, varsInputs[0], c.update);
+    if (c.reboot)
+      box.querySelector(".btn-maint-reboot").onclick = () =>
+        runBulk("reboot", group, varsInputs[1], c.reboot);
+    bar.appendChild(box);
+  }
+}
+
+async function runBulk(action, group, input, count){
+  const label = action === "update" ? "Bulk-Update" : "Bulk-Reboot";
+  if (!confirm(`${label} für ${count} Projekt(e) in „${SERVER_GROUP_LABELS[group]}“ jetzt starten?`))
+    return;
+  const varsStr = input.value;
+  localStorage.setItem(`maintvars_${group}_${action}`, varsStr);
+  try {
+    const d = await api(`/api/maintenance/bulk/${action}`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({server_group: group, variables: parseVars(varsStr)})
+    });
+    let msg = `${label} ${SERVER_GROUP_LABELS[group]}: ${d.triggered.length} gestartet`;
+    if (d.failed.length)
+      msg += `, ${d.failed.length} fehlgeschlagen (${d.failed.map(f => f.name).join(", ")})`;
+    toast(msg, 8000);
+  } catch(e){ toast("Fehler: " + e.message, 6000); }
+}
+
+$("#btn-maintenance").onclick = () => {
+  maintenanceMode = !maintenanceMode;
+  $("#btn-maintenance").classList.toggle("active", maintenanceMode);
+  $("#maint-bar").style.display = maintenanceMode ? "flex" : "none";
+  renderTree();
+};
+
+function openMaintTag(p){
+  MT_CUR = p;
+  const tag = MAINT_TAGS[p.id];
+  $("#mt-title").textContent = p.name;
+  $("#mt-group").value = tag ? tag.server_group : "linux-intern";
+  $("#mt-update").checked = !!(tag && tag.update);
+  $("#mt-reboot").checked = !!(tag && tag.reboot);
+  $("#mt-remove").style.display = tag ? "inline-block" : "none";
+  $("#maint-tag-bg").style.display = "flex";
+}
+
+function closeMaintTag(){ $("#maint-tag-bg").style.display = "none"; MT_CUR = null; }
+
+function applyMaintTagUpdate(projectId, tag){
+  if (tag) MAINT_TAGS[projectId] = tag; else delete MAINT_TAGS[projectId];
+  renderTree();
+  renderMaintBar();
+}
+
+async function saveMaintTag(){
+  if (!MT_CUR) return;
+  $("#mt-save").disabled = true;
+  try {
+    const tag = await api(`/api/maintenance/tags/${MT_CUR.id}`, {
+      method: "PUT", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        update: $("#mt-update").checked,
+        reboot: $("#mt-reboot").checked,
+        server_group: $("#mt-group").value,
+      })
+    });
+    applyMaintTagUpdate(MT_CUR.id, tag);
+    closeMaintTag();
+  } catch(e){ toast("Fehler: " + e.message, 6000); }
+  finally { $("#mt-save").disabled = false; }
+}
+
+async function removeMaintTag(){
+  if (!MT_CUR) return;
+  try {
+    await api(`/api/maintenance/tags/${MT_CUR.id}`, {
+      method: "PUT", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({update: false, reboot: false, server_group: null})
+    });
+    applyMaintTagUpdate(MT_CUR.id, null);
+    closeMaintTag();
+  } catch(e){ toast("Fehler: " + e.message, 6000); }
+}
+
+$("#mt-reboot").onchange = () => { if ($("#mt-reboot").checked) $("#mt-update").checked = true; };
+$("#mt-update").onchange = () => { if (!$("#mt-update").checked) $("#mt-reboot").checked = false; };
+$("#mt-save").onclick = saveMaintTag;
+$("#mt-remove").onclick = removeMaintTag;
+$("#mt-cancel").onclick = closeMaintTag;
+$("#maint-tag-bg").onclick = e => { if (e.target.id === "maint-tag-bg") closeMaintTag(); };
 
 /* --------------------------------------------------- Benutzerverwaltung (👤) */
 async function openUsers(){

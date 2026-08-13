@@ -73,3 +73,14 @@ class CheckContentBody(BaseModel):
 
 class VarsSaveBody(BaseModel):
     variables: list[dict] = Field(default_factory=list)
+
+
+class MaintenanceTagBody(BaseModel):
+    update: bool = False
+    reboot: bool = False
+    server_group: str | None = None
+
+
+class MaintenanceBulkBody(BaseModel):
+    server_group: str
+    variables: list[dict] = Field(default_factory=list)
