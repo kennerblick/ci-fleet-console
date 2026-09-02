@@ -254,6 +254,7 @@ async function selectProject(id){
   GRP = null;
   $("#group-detail").style.display = "none";
   openJobs.clear(); closedJobs.clear(); showAllPipes = false; autoPipelineId = null;
+  pipeRows.clear(); $("#pipes-table tbody").innerHTML = "";
   clearInterval(pollTimer); pollTimer = null;
   document.querySelectorAll(".proj.active").forEach(e => e.classList.remove("active"));
   document.querySelector(`.proj[data-id="${id}"]`)?.classList.add("active");
@@ -282,10 +283,20 @@ let autoPipelineId = null;           // welche Pipeline-ID die Stage-Ansicht zei
                                       // Ansicht nicht mitten in der Beobachtung auf
                                       // eine zwischenzeitlich neu entstandene Pipeline
                                       // umspringt (z.B. Scheduled Pipeline eines anderen).
+const pipeRows = new Map();          // Pipeline-ID -> <tr>, bleibt über Polls hinweg
+                                      // bestehen, damit ein Refresh nur Inhalte
+                                      // aktualisiert statt die Tabelle (und die
+                                      // offene Job-Ansicht) jedes Mal wegzureißen
+                                      // und neu aufzubauen ("unruhiges" Blinken).
+
+function pipeRowHtml(p){
+  return `<td><span class="badge"><span class="dot ${stClass(p.status)}"></span>${stLabel(p.status)}</span></td>` +
+    `<td>${p.ref || ""}</td><td class="muted">${p.sha}</td>` +
+    `<td class="muted">${p.source || ""}</td><td class="muted">${fmtTime(p.created_at)}</td>` +
+    `<td><a href="${p.web_url}" target="_blank" rel="noopener">#${p.id} ↗</a></td>`;
+}
 
 async function loadPipelines(refresh){
-  const tbody = $("#pipes-table tbody");
-  tbody.innerHTML = "";
   let data;
   try { data = await api(`/api/projects/${CUR.id}/pipelines` + (refresh ? "?refresh=1" : "")); }
   catch(e){ toast("Pipelines: " + e.message, 5000); return; }
@@ -301,14 +312,28 @@ async function loadPipelines(refresh){
   if (autoIdx === -1) autoIdx = visible.findIndex(p => p.status !== "skipped");
   if (autoIdx === -1) autoIdx = 0;
   autoPipelineId = visible[autoIdx]?.id ?? null;
+
+  const tbody = $("#pipes-table tbody");
+  const seen = new Set(visible.map(p => p.id));
+  // Zeilen entfernen, die aus der sichtbaren Liste gefallen sind (z. B. durch
+  // "weniger anzeigen" oder weil eine neuere Pipeline sie verdrängt hat).
+  for (const [pid, tr] of pipeRows){
+    if (seen.has(pid)) continue;
+    if (tr.nextElementSibling?.classList.contains("jobsrow")) tr.nextElementSibling.remove();
+    tr.remove();
+    pipeRows.delete(pid);
+  }
+
   visible.forEach((p, i) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td><span class="badge"><span class="dot ${stClass(p.status)}"></span>${stLabel(p.status)}</span></td>` +
-      `<td>${p.ref || ""}</td><td class="muted">${p.sha}</td>` +
-      `<td class="muted">${p.source || ""}</td><td class="muted">${fmtTime(p.created_at)}</td>` +
-      `<td><a href="${p.web_url}" target="_blank" rel="noopener">#${p.id} ↗</a></td>`;
-    tbody.appendChild(tr);
+    let tr = pipeRows.get(p.id);
+    if (!tr){
+      tr = document.createElement("tr");
+      pipeRows.set(p.id, tr);
+    }
+    tr.innerHTML = pipeRowHtml(p);
+    const existingJr = tr.nextElementSibling?.classList.contains("jobsrow") ? tr.nextElementSibling : null;
+    tbody.appendChild(tr);                  // an das Ende schieben -> stellt die Reihenfolge her,
+    if (existingJr) tr.after(existingJr);   // die Job-Ansicht bleibt dabei an ihrer Zeile "kleben"
 
     // Nur die neueste relevante Pipeline bekommt die Stage-/Job-Ansicht
     // (auto-geöffnet, per Klick zuklappbar). Alle anderen bleiben einzeilig.
@@ -321,9 +346,14 @@ async function loadPipelines(refresh){
         openJobs.add(p.id);
         toggleJobs(tr, p.id, true);
       }
+    } else if (existingJr){
+      // war zuvor die aktive Pipeline, wurde jetzt von einer neueren verdrängt
+      tr.className = ""; tr.onclick = null;
+      existingJr.remove(); openJobs.delete(p.id);
     }
   });
 
+  tbody.querySelector("#btn-more-pipes")?.closest("tr")?.remove();
   const hidden = data.pipelines.length - visible.length;
   if (hidden > 0 || showAllPipes){
     const tr = document.createElement("tr");
