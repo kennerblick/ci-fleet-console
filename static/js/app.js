@@ -253,7 +253,7 @@ async function selectProject(id){
   CUR_REF = null;
   GRP = null;
   $("#group-detail").style.display = "none";
-  openJobs.clear(); closedJobs.clear(); showAllPipes = false; autoPipelineId = null;
+  openJobs.clear(); closedJobs.clear();
   pipeRows.clear(); $("#pipes-table tbody").innerHTML = "";
   clearInterval(pollTimer); pollTimer = null;
   document.querySelectorAll(".proj.active").forEach(e => e.classList.remove("active"));
@@ -275,14 +275,7 @@ async function selectProject(id){
   loadVars();
 }
 
-let showAllPipes = false;            // "x weitere anzeigen" aufgeklappt?
 const closedJobs = new Set();        // vom Nutzer bewusst zugeklappte Stage-Ansichten
-const PIPES_VISIBLE = 3;
-let autoPipelineId = null;           // welche Pipeline-ID die Stage-Ansicht zeigt –
-                                      // bleibt über Polls hinweg stehen, damit die
-                                      // Ansicht nicht mitten in der Beobachtung auf
-                                      // eine zwischenzeitlich neu entstandene Pipeline
-                                      // umspringt (z.B. Scheduled Pipeline eines anderen).
 const pipeRows = new Map();          // Pipeline-ID -> <tr>, bleibt über Polls hinweg
                                       // bestehen, damit ein Refresh nur Inhalte
                                       // aktualisiert statt die Tabelle (und die
@@ -302,21 +295,15 @@ async function loadPipelines(refresh){
   catch(e){ toast("Pipelines: " + e.message, 5000); return; }
   $("#pipes-empty").style.display = data.pipelines.length ? "none" : "block";
 
-  const visible = showAllPipes ? data.pipelines : data.pipelines.slice(0, PIPES_VISIBLE);
-  // Skip-Pipelines (z. B. aus ci.skip-Pushes der CI selbst) sind Rauschen.
-  // Die zuletzt gezeigte Pipeline bleibt aktiv, solange sie noch sichtbar ist;
-  // nur beim allerersten Laden (oder wenn sie herausgefallen ist) wird neu auf
-  // die neueste, nicht übersprungene Pipeline verzweigt.
-  let autoIdx = autoPipelineId != null
-    ? visible.findIndex(p => p.id === autoPipelineId) : -1;
-  if (autoIdx === -1) autoIdx = visible.findIndex(p => p.status !== "skipped");
-  if (autoIdx === -1) autoIdx = 0;
-  autoPipelineId = visible[autoIdx]?.id ?? null;
+  // Nur die aktuelle Pipeline anzeigen, keine Historie. Skip-Pipelines
+  // (z. B. aus ci.skip-Pushes der CI selbst) sind Rauschen und werden
+  // übersprungen, solange es eine "echte" gibt.
+  const current = data.pipelines.find(p => p.status !== "skipped") ?? data.pipelines[0] ?? null;
+  const visible = current ? [current] : [];
 
   const tbody = $("#pipes-table tbody");
   const seen = new Set(visible.map(p => p.id));
-  // Zeilen entfernen, die aus der sichtbaren Liste gefallen sind (z. B. durch
-  // "weniger anzeigen" oder weil eine neuere Pipeline sie verdrängt hat).
+  // Zeilen entfernen, die nicht mehr die aktuelle Pipeline sind.
   for (const [pid, tr] of pipeRows){
     if (seen.has(pid)) continue;
     if (tr.nextElementSibling?.classList.contains("jobsrow")) tr.nextElementSibling.remove();
@@ -324,7 +311,7 @@ async function loadPipelines(refresh){
     pipeRows.delete(pid);
   }
 
-  visible.forEach((p, i) => {
+  visible.forEach(p => {
     let tr = pipeRows.get(p.id);
     if (!tr){
       tr = document.createElement("tr");
@@ -335,35 +322,15 @@ async function loadPipelines(refresh){
     tbody.appendChild(tr);                  // an das Ende schieben -> stellt die Reihenfolge her,
     if (existingJr) tr.after(existingJr);   // die Job-Ansicht bleibt dabei an ihrer Zeile "kleben"
 
-    // Nur die neueste relevante Pipeline bekommt die Stage-/Job-Ansicht
-    // (auto-geöffnet, per Klick zuklappbar). Alle anderen bleiben einzeilig.
-    if (i === autoIdx){
-      tr.className = "piperow";
-      tr.onclick = e => {
-        if (e.target.tagName !== "A" && !e.target.closest("button")) toggleJobs(tr, p.id);
-      };
-      if (!closedJobs.has(p.id)){
-        openJobs.add(p.id);
-        toggleJobs(tr, p.id, true);
-      }
-    } else if (existingJr){
-      // war zuvor die aktive Pipeline, wurde jetzt von einer neueren verdrängt
-      tr.className = ""; tr.onclick = null;
-      existingJr.remove(); openJobs.delete(p.id);
+    tr.className = "piperow";
+    tr.onclick = e => {
+      if (e.target.tagName !== "A" && !e.target.closest("button")) toggleJobs(tr, p.id);
+    };
+    if (!closedJobs.has(p.id)){
+      openJobs.add(p.id);
+      toggleJobs(tr, p.id, true);
     }
   });
-
-  tbody.querySelector("#btn-more-pipes")?.closest("tr")?.remove();
-  const hidden = data.pipelines.length - visible.length;
-  if (hidden > 0 || showAllPipes){
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="6" style="text-align:center;border-bottom:none">
-      <button id="btn-more-pipes">${showAllPipes
-        ? "▴ weniger anzeigen"
-        : `▾ ${hidden} weitere anzeigen`}</button></td>`;
-    tr.querySelector("button").onclick = () => { showAllPipes = !showAllPipes; loadPipelines(); };
-    tbody.appendChild(tr);
-  }
 
   const active = data.pipelines.some(p => ["running","pending","created"].includes(p.status));
   clearInterval(pollTimer); pollTimer = null;
@@ -592,7 +559,6 @@ async function runPipeline(){
             `CI_PIPELINE_SOURCE == "api" zu.`, 8000);
     else
       toast(`Pipeline #${p.id} gestartet (${p.status}).`);
-    autoPipelineId = p.id;
     loadPipelines(1);
   } catch(e){ toast("Fehler: " + e.message, 6000); }
   finally { $("#btn-run").disabled = false; }
