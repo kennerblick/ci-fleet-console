@@ -368,7 +368,13 @@ async function toggleJobs(tr, pid, forceOpen){
   }
   try {
     const d = await api(`/api/projects/${CUR.id}/pipelines/${pid}/jobs`);
-    jr.firstElementChild.innerHTML = renderStages(d.jobs, pid);
+    const html = renderStages(d.jobs, pid);
+    // Nur bei echter Änderung neu zeichnen - sonst baut sich die Job-Ansicht
+    // bei jedem 10s-Poll komplett neu auf, obwohl sich nichts geändert hat.
+    if (jr._html !== html){
+      jr.firstElementChild.innerHTML = html;
+      jr._html = html;
+    }
     if (anyActiveJob(d.jobs)) ensurePolling();
   } catch(e){ jr.firstElementChild.textContent = "Fehler: " + e.message; }
 }
